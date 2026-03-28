@@ -44,7 +44,7 @@ jobs:
 
     # 7️⃣ Restore YouTube Token from Secret
     - name: Restore YouTube Token
-      run: echo "${{ secrets.YOUTUBE_TOKEN }}" | base64 --decode > token.pickle
+      run: echo '${{ secrets.YOUTUBE_TOKEN }}' > token.json
 
     # 8️⃣ Upload Video to YouTube
     - name: Upload to YouTube
