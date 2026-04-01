@@ -1,14 +1,19 @@
 import os
 import json
 
-# === GITHUB ACTIONS: Load credentials dari environment variable ===
+# ================================================================
+# GITHUB ACTIONS: Load credentials dari environment variable
+# Harus di paling atas sebelum import library Google
+# ================================================================
 if os.environ.get("YOUTUBE_CLIENT_SECRET"):
     with open("client_secret.json", "w") as f:
         f.write(os.environ["YOUTUBE_CLIENT_SECRET"])
+    print("✅ client_secret.json restored from env")
 
 if os.environ.get("YOUTUBE_TOKEN"):
     with open("token.json", "w") as f:
         f.write(os.environ["YOUTUBE_TOKEN"])
+    print("✅ token.json restored from env")
 # ================================================================
 
 from google.oauth2.credentials import Credentials
@@ -17,81 +22,109 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 VIDEO_FILE = "final_video.mp4"
+META_FILE = "video_meta.json"
+TOKEN_FILE = "token.json"
+
 
 def load_credentials():
-    creds = Credentials.from_authorized_user_file("token.json")
+    """Load dan auto-refresh credentials dari token.json."""
+    if not os.path.exists(TOKEN_FILE):
+        raise FileNotFoundError(
+            f"❌ {TOKEN_FILE} tidak ditemukan. "
+            "Pastikan secret YOUTUBE_TOKEN sudah diset di GitHub."
+        )
 
-    # Auto refresh jika token expired
+    creds = Credentials.from_authorized_user_file(TOKEN_FILE)
+
+    # Auto-refresh jika token expired
     if creds.expired and creds.refresh_token:
         print("🔄 Token expired, refreshing...")
         creds.refresh(Request())
         # Simpan token yang sudah di-refresh
-        with open("token.json", "w") as f:
+        with open(TOKEN_FILE, "w") as f:
             f.write(creds.to_json())
-        print("✅ Token berhasil di-refresh")
+        print("✅ Token refreshed successfully")
 
     return creds
 
+
+def load_metadata():
+    """Baca metadata video yang dihasilkan main.py."""
+    if os.path.exists(META_FILE):
+        with open(META_FILE, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        print(f"✅ Loaded metadata: {meta['title'][:60]}...")
+        return meta
+    else:
+        # Fallback metadata jika video_meta.json tidak ada
+        print("⚠️  video_meta.json not found, using fallback metadata")
+        return {
+            "title": "🎧 1 Hour Lofi Hip Hop Beats – Relax & Study Music | Driftory",
+            "description": """🎶 beats to drift & focus 🌙
+
+Welcome to Driftory 🎧 — your daily generative lofi station.
+
+✨ Subscribe for fresh beats every day.
+👍 Like if this helped you focus.
+🔔 Turn on notifications.
+
+#lofi #studymusic #chillbeats #Driftory #lofihiphop""",
+            "tags": [
+                "1 hour lofi", "lofi hip hop", "study music",
+                "focus music", "chill beats", "relaxing music",
+                "background music", "lofi beats", "Driftory"
+            ]
+        }
+
+
 def upload_video():
+    if not os.path.exists(VIDEO_FILE):
+        raise FileNotFoundError(f"❌ {VIDEO_FILE} tidak ditemukan. Pastikan main.py sudah jalan.")
+
+    print("🔑 Loading credentials...")
     creds = load_credentials()
+
+    print("📋 Loading video metadata...")
+    meta = load_metadata()
+
+    print("🔧 Building YouTube client...")
     youtube = build("youtube", "v3", credentials=creds)
 
+    print(f"🚀 Uploading: {meta['title'][:60]}...")
     request = youtube.videos().insert(
         part="snippet,status",
         body={
             "snippet": {
-                "title": "🎧 1 Hour Lofi Hip Hop Beat – Relaxing Study Music 🌙 | Chill Focus & Sleep | Zero Touch Music",
-                "description": """🎶 1 Hour of Relaxing Lofi Hip Hop Beats for Study, Focus, and Sleep.
-Welcome to Zero Touch Music 🎧 — your home for chill lofi vibes and peaceful background music.
-This 1 hour lofi mix is perfect for:
-📚 Studying & Homework
-💻 Deep Focus & Productivity
-🌙 Late Night Sessions
-😴 Sleep & Relaxation
-🌿 Stress Relief
-If you're searching for:
-lofi hip hop, 1 hour lofi beat, relaxing study music, chill beats for focus, calm background music, sleep lofi — this mix is made for you.
-✨ Subscribe to Zero Touch Music for everyday lofi beats.
-👍 Like & comment if this helped you focus.
-🔔 Turn on notifications for more chill vibes.
-Press play. Relax. Let the beat flow 🌊
-#lofi 
-#study 
-#chill 
-#ZeroTouchMusic
-#1hourlofi
-#lofihiphop
-#lofibeats
-#studymusic
-#studybeats
-#focusmusic
-#sleepmusic
-#relaxingmusic
-#chillbeats
-#instrumental
-#backgroundmusic
-#lofivibes
-#calmmusic""",
-                "tags": [
-                    "1 hour lofi","1 hour lofi hip hop","1 hour lofi beat",
-                    "lofi hip hop","lofi beats","lofi study music",
-                    "study music 1 hour","study beats","chill beats",
-                    "relaxing lofi","focus music","deep focus music",
-                    "sleep lofi","calm background music","background music for studying",
-                    "chillhop mix","instrumental hip hop","aesthetic lofi",
-                    "late night lofi","Zero Touch Music"
-                ],
-                "categoryId": "10"
+                "title": meta["title"],
+                "description": meta["description"],
+                "tags": meta.get("tags", []),
+                "categoryId": "10",  # Music category
             },
             "status": {
-                "privacyStatus": "public"
+                "privacyStatus": "public",
+                "selfDeclaredMadeForKids": False,
             }
         },
-        media_body=MediaFileUpload(VIDEO_FILE, resumable=True)
+        media_body=MediaFileUpload(VIDEO_FILE, resumable=True, chunksize=10 * 1024 * 1024)
     )
 
-    response = request.execute()
-    print("✅ Uploaded Video ID:", response["id"])
+    # Resumable upload dengan progress
+    response = None
+    while response is None:
+        status, response = request.next_chunk()
+        if status:
+            pct = int(status.progress() * 100)
+            print(f"   Upload progress: {pct}%")
+
+    video_id = response["id"]
+    print(f"✅ Upload berhasil!")
+    print(f"   Video ID : {video_id}")
+    print(f"   URL      : https://www.youtube.com/watch?v={video_id}")
+    print(f"   Scale    : {meta.get('scale', 'N/A')} | Root: {meta.get('root', 'N/A')} | BPM: {meta.get('bpm', 'N/A')}")
+    print(f"   Hook     : {meta.get('hook', 'N/A')}")
+
+    return video_id
+
 
 if __name__ == "__main__":
     upload_video()
