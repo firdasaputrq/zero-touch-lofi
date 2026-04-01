@@ -1,9 +1,18 @@
 # ============================================================
-# DRIFTORY - GENERATIVE LOFI ENGINE v6
+# DRIFTORY - GENERATIVE LOFI ENGINE v7
 # 100% Python • No API • No GPU • Berjalan di GitHub Actions
-# FM Rhodes Synth • Layered Drums • Sidechain • Tape Saturation
-# Vinyl Crackle • Room Reverb • Stereo Widening • 1-Jam Auto Loop
-# UPGRADE v6: Swing groove, phrase melody, walking bass, humanized drums
+# ─────────────────────────────────────────────────────────────
+# UPGRADE v7:
+#   • FM Rhodes synth (velocity-sensitive, key-click, tremolo)
+#   • Swing quantization (ratio 0.58, jazz feel)
+#   • Chord-conditioned melody (jacbz/Lofi insight)
+#   • Probabilistic note duration (mtsandra insight)
+#   • Section structure: intro → verse → bridge → verse2 → outro
+#   • Walking bass: root → fifth → walk → chromatic approach
+#   • Ghost notes, rim shot, humanized drum grid
+#   • Tape saturation, room reverb, vinyl crackle, sidechain
+#   • Stereo widening via chorus delay
+#   • RGBA→RGB fix untuk beat visualizer (MoviePy compat)
 # ============================================================
 
 import numpy as np
@@ -16,11 +25,12 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 
 SR             = 44100
-FINAL_DURATION = 300
+FINAL_DURATION = 300   # detik — ganti ke 3600 untuk 1 jam
 WAV_OUTPUT     = "lofi_output.wav"
 VIDEO_OUTPUT   = "final_video.mp4"
 CHANNEL_NAME   = "Driftory"
 
+# ── Mood presets ──────────────────────────────────────────────────────
 MOODS = {
     "rainy_night": {
         "scale":      "minor",
@@ -104,6 +114,7 @@ with open("hook.txt", "w", encoding="utf-8") as f:
 
 print(f"🎵 Mood: {mood_key} | Scale: {scale_name} | BPM: {BPM} | Hook: {hook_meta}")
 
+# ── Scale definitions ─────────────────────────────────────────────────
 SCALES = {
     "minor":  [0, 2, 3, 5, 7, 8, 10],
     "dorian": [0, 2, 3, 5, 7, 9, 10],
@@ -111,13 +122,44 @@ SCALES = {
 }
 scale = SCALES[scale_name]
 
-# ── Swing quantization helper ─────────────────────────────────────────
+# ── Chord progressions (Roman numeral style, dari real lofi songs) ────
+# Berdasarkan dataset jacbz/Lofi: progressi paling umum dari Hooktheory
+PROGRESSIONS = {
+    "minor":  [
+        [[0,2,4],[5,0,2],[3,5,0],[4,6,1]],   # i-VI-III-VII
+        [[0,2,4],[3,5,0],[6,1,3],[5,0,2]],   # i-III-VI-VII
+        [[0,3,5],[6,1,3],[4,6,1],[5,0,2]],   # i-VI-iv-VII
+    ],
+    "dorian": [
+        [[0,2,4],[3,5,0],[1,3,5],[4,6,1]],
+        [[0,4,6],[3,5,0],[1,3,5],[4,6,1]],
+    ],
+    "major":  [
+        [[0,2,4],[3,5,0],[4,6,1],[3,5,0]],   # I-IV-V-IV
+        [[0,2,4],[5,0,2],[3,5,0],[4,6,1]],   # I-vi-IV-V
+    ],
+}
+progression = random.choice(PROGRESSIONS[scale_name])
+
+# ── Chord tone map — untuk chord-conditioned melody (jacbz insight) ───
+# Melody hanya menggunakan chord tones + passing tones yang enak
+def get_chord_tones(chord_degrees):
+    """Return scale degrees yang 'safe' dimainkan di atas chord ini."""
+    chord_set = set(chord_degrees)
+    # Tambah tetangga terdekat sebagai passing tones
+    passing = set()
+    for d in chord_degrees:
+        passing.add((d + 1) % len(scale))
+        passing.add((d - 1) % len(scale))
+    return list(chord_set | passing)
+
+# ── Swing quantization ────────────────────────────────────────────────
 SWING = 0.58   # 0.5 = straight, 0.67 = heavy swing
 def swing_offset(eighth_idx):
-    """Return time offset in seconds for a given eighth-note index with swing."""
-    beat_idx   = eighth_idx // 2
-    sub_idx    = eighth_idx % 2
-    beat_time  = beat_idx * BEAT
+    """Return time offset (detik) untuk eighth-note index dengan swing."""
+    beat_idx = eighth_idx // 2
+    sub_idx  = eighth_idx % 2
+    beat_time = beat_idx * BEAT
     if sub_idx == 0:
         return beat_time
     else:
@@ -127,14 +169,16 @@ def note_freq(base, degree, octave=0):
     semitone = scale[degree % len(scale)] + (degree // len(scale)) * 12
     return base * (2 ** (semitone / 12)) * (2 ** octave)
 
-# ── FM Rhodes synthesizer v2 — richer harmonics, velocity-sensitive ───
+# ── FM Rhodes synthesizer (velocity-sensitive, key-click, tremolo) ────
 def rhodes_tone(freq, duration, velocity=0.8):
-    n  = int(SR * duration)
-    t  = np.linspace(0, duration, n, endpoint=False)
+    n = int(SR * duration)
+    if n <= 0:
+        return np.zeros(1)
+    t = np.linspace(0, duration, n, endpoint=False)
 
-    # FM: velocity affects modulation index (harder hit = brighter)
-    mod_ratio = 2.0
-    mod_index = 1.4 + velocity * 0.9
+    # FM: harder hit = brighter (higher mod index)
+    mod_ratio  = 2.0
+    mod_index  = 1.4 + velocity * 0.9
     modulator  = np.sin(2 * np.pi * freq * mod_ratio * t)
     modulator2 = np.sin(2 * np.pi * freq * 3.0 * t) * 0.3
     carrier    = np.sin(2 * np.pi * freq * t + mod_index * (modulator + modulator2))
@@ -145,7 +189,7 @@ def rhodes_tone(freq, duration, velocity=0.8):
     h4   = 0.03 * np.sin(2 * np.pi * freq * 4 * t)
     wave = carrier + h2 + h3 + h4
 
-    # Velocity-sensitive envelope (harder = longer sustain)
+    # Velocity-sensitive envelope
     atk  = min(int(0.002 * SR), n)
     dec  = min(int((0.08 + velocity * 0.08) * SR), n - atk)
     sus  = 0.32 + velocity * 0.18
@@ -158,29 +202,28 @@ def rhodes_tone(freq, duration, velocity=0.8):
         np.linspace(sus, 0, rel) ** 2.2,
     ])[:n]
 
-    # Subtle key-click at attack
+    # Subtle key-click transient (Rhodes fisik)
     click_len = min(int(0.001 * SR), n)
-    click     = np.random.randn(click_len) * velocity * 0.06
-    wave[:click_len] += click
+    wave[:click_len] += np.random.randn(click_len) * velocity * 0.06
 
-    # Tremolo (speed varies slightly per note for naturalness)
-    trem_rate = random.uniform(4.8, 5.8)
+    # Tremolo (speed random per note = natural)
+    trem_rate  = random.uniform(4.8, 5.8)
     trem_depth = 0.028 + velocity * 0.015
-    trem      = 1.0 + trem_depth * np.sin(2 * np.pi * trem_rate * t)
+    trem       = 1.0 + trem_depth * np.sin(2 * np.pi * trem_rate * t)
 
     return wave * env * trem * velocity * 0.85
 
-# ── Chord voicing — spread voicing, humanized strum & timing ─────────
+# ── Chord voicing dengan humanized strum ─────────────────────────────
 def strum_chord(degrees, duration, velocity=0.72, strum_ms=18):
     n    = int(SR * duration)
     wave = np.zeros(n)
 
-    # Bass note an octave down, slightly ahead of the strum
+    # Bass note satu oktav di bawah
     bf   = note_freq(root, degrees[0], -1)
     bass = rhodes_tone(bf, duration, velocity * 0.55)
     wave[:len(bass)] += bass * 0.48
 
-    # Inner voices with slight random strum offset
+    # Strum timing acak (bukan seragam)
     strum_offsets = sorted([random.uniform(0, strum_ms * 0.001) for _ in degrees])
     for i, deg in enumerate(degrees):
         oct_        = 1 if i == len(degrees) - 1 else 0
@@ -191,19 +234,14 @@ def strum_chord(degrees, duration, velocity=0.72, strum_ms=18):
         end         = min(strum_delay + len(tone), n)
         wave[strum_delay:end] += tone[:end - strum_delay]
 
-    # Small random timing nudge for the whole chord (human feel)
-    nudge = int(random.uniform(-0.006, 0.009) * SR)
-    if nudge > 0:
-        wave = np.concatenate([np.zeros(nudge), wave[:-nudge]])
-    elif nudge < 0:
-        wave = np.concatenate([wave[-nudge:], np.zeros(-nudge)])
-
     return wave / (len(degrees) + 1.2)
 
-# ── Sub bass — walking jazz-style ────────────────────────────────────
+# ── Sub bass dengan walking pattern ──────────────────────────────────
 def make_bass_note(freq, duration):
-    n    = int(SR * duration)
-    t    = np.linspace(0, duration, n, endpoint=False)
+    n = int(SR * duration)
+    if n <= 0:
+        return np.zeros(1)
+    t = np.linspace(0, duration, n, endpoint=False)
 
     sub  = np.sin(2 * np.pi * freq * t)
     oct2 = 0.22 * np.sin(2 * np.pi * freq * 2 * t)
@@ -228,33 +266,26 @@ def make_bass_note(freq, duration):
 def chord_root_freq(chord_degrees, octave=-1):
     return note_freq(root, chord_degrees[0], octave)
 
-def approach_note(target_freq, semitones=1):
-    """Chromatic approach note a half-step below."""
+def approach_note_freq(target_freq, semitones=1):
     return target_freq * (2 ** (-semitones / 12))
 
-# ── Drum synthesizer v2 — more character ─────────────────────────────
+# ── Drum synthesizer ──────────────────────────────────────────────────
 def make_kick(variation=0):
     dur   = 0.55; n = int(SR * dur); t = np.linspace(0, dur, n)
-    if variation == 0:
-        freq  = np.linspace(195, 42, n)
-    else:
-        freq  = np.linspace(175, 38, n)  # slightly deeper on alt hit
+    start = 195 if variation == 0 else 175
+    end_f = 42  if variation == 0 else 38
+    freq  = np.linspace(start, end_f, n)
     phase = np.cumsum(2 * np.pi * freq / SR)
     body  = np.sin(phase) * np.exp(-t * 8.5) * 0.90
     click_len = int(0.004 * SR)
     click = np.random.randn(click_len) * np.linspace(1, 0, click_len)
     body[:click_len] += click * 0.28
-    # Subtle pitch mod for analog feel
     body *= (1.0 + 0.04 * np.exp(-t * 40))
     return np.tanh(body * 1.7) / 1.7
 
 def make_snare(ghost=False):
-    if ghost:
-        vel_scale = random.uniform(0.08, 0.18)
-        dur = 0.12
-    else:
-        vel_scale = random.uniform(0.80, 1.0)
-        dur = 0.22
+    vel_scale = random.uniform(0.08, 0.18) if ghost else random.uniform(0.80, 1.0)
+    dur = 0.12 if ghost else 0.22
     n    = int(SR * dur); t = np.linspace(0, dur, n)
     tone = (
         np.sin(2*np.pi*185*t)*0.40 +
@@ -264,8 +295,7 @@ def make_snare(ghost=False):
     noise = np.random.randn(n)
     b, a  = signal.butter(3, [800/(SR/2), 9000/(SR/2)], btype='band')
     noise = signal.lfilter(b, a, noise) * np.exp(-t * (18 if ghost else 13))
-    result = (tone * 0.35 + noise * 0.65) * np.exp(-t * 4.5) * 0.58
-    return result * vel_scale
+    return (tone * 0.35 + noise * 0.65) * np.exp(-t * 4.5) * 0.58 * vel_scale
 
 def make_hihat(open_hat=False, vel=1.0):
     dur   = 0.14 if open_hat else 0.028
@@ -280,64 +310,71 @@ def make_hihat(open_hat=False, vel=1.0):
     return metal * env * 0.10 * vel
 
 def make_rim():
-    """Rimshot — adds jazz feel."""
     dur  = 0.08; n = int(SR * dur); t = np.linspace(0, dur, n)
     tone = np.sin(2*np.pi*750*t) * np.exp(-t * 65) * 0.5
     click = np.random.randn(n) * np.exp(-t * 200) * 0.4
     b, a  = signal.butter(3, 3000/(SR/2), btype='high')
     return signal.lfilter(b, a, tone + click) * 0.22
 
-# ── Phrase-based melody generator ────────────────────────────────────
-def generate_melody_phrase(scale_degrees, bars=2):
+# ── Probabilistic note duration (mtsandra insight) ────────────────────
+# Distribusi: 55% eighth, 20% quarter, 10% half, 15% sixteenth
+NOTE_DURATIONS  = {1: 0.55, 2: 0.20, 4: 0.10, 0.5: 0.15}
+# Default rest: 16th note (70%) agar tidak silent terlalu lama
+REST_DURATIONS  = {0.5: 0.70, 1: 0.20, 2: 0.10}
+
+def pick_duration(is_rest=False):
+    table = REST_DURATIONS if is_rest else NOTE_DURATIONS
+    keys  = list(table.keys())
+    probs = list(table.values())
+    return random.choices(keys, weights=probs, k=1)[0]
+
+# ── Chord-conditioned melody phrase (jacbz insight) ───────────────────
+def generate_melody_phrase(chord_tones, scale_degrees, bars=2):
     """
-    Generate a 2-bar melodic phrase with motivic development.
-    Returns list of (eighth_idx, degree, octave, duration_beats, velocity).
+    Generate phrase yang hanya menggunakan chord tones & passing tones.
+    Statement (motif) → Response (transpose/invert) ala jazz improviser.
     """
-    # Build a short motif (3-5 notes) then develop it
-    motif_len  = random.randint(3, 5)
-    motif_degs = [random.choice(scale_degrees) for _ in range(motif_len)]
+    allowed   = chord_tones if random.random() < 0.65 else scale_degrees
+    motif_len = random.randint(3, 5)
+    motif_degs = [random.choice(allowed) for _ in range(motif_len)]
     motif_vels = [random.uniform(0.38, 0.62) for _ in range(motif_len)]
 
-    notes = []
-    eighths_per_bar = 8
-    total_eighths   = bars * eighths_per_bar
-    e = 0
-    phrase_phase = 0  # 0=statement, 1=response/development
+    notes         = []
+    total_eighths = bars * 8
+    e             = 0
+    phrase_phase  = 0  # 0=statement, 1=response
 
     while e < total_eighths - 1:
         if phrase_phase == 0:
-            # Statement: play motif with gaps
-            for mi, (deg, vel) in enumerate(zip(motif_degs, motif_vels)):
+            for mi in range(len(motif_degs)):
                 if e >= total_eighths - 1: break
-                dur_e = random.choice([1, 1, 2, 2, 3])
-                notes.append((e, deg, 2, dur_e * BEAT / 2, vel))
+                dur_e = pick_duration(is_rest=False)
+                notes.append((e, motif_degs[mi], 2,
+                              dur_e * BEAT / 2, motif_vels[mi]))
                 e += dur_e
-                # small gap sometimes
-                if random.random() < 0.35:
-                    e += random.choice([1, 2])
+                if random.random() < 0.40:
+                    e += pick_duration(is_rest=True)
             phrase_phase = 1
-            e += random.choice([1, 2, 3])  # breath
+            e += pick_duration(is_rest=True) * random.choice([1, 2])
         else:
-            # Response: transposed or inverted fragment
-            frag_len = random.randint(2, 3)
+            frag_len = random.randint(2, 4)
             for fi in range(frag_len):
                 if e >= total_eighths - 1: break
-                # Transpose motif up or down by 1-2 scale degrees
                 base_deg = motif_degs[fi % len(motif_degs)]
                 shift    = random.choice([-2, -1, 0, 1, 2])
                 deg      = (base_deg + shift) % len(scale)
                 vel      = motif_vels[fi % len(motif_vels)] * random.uniform(0.85, 1.05)
-                dur_e    = random.choice([1, 2, 2])
+                dur_e    = pick_duration(is_rest=False)
                 notes.append((e, deg, 2, dur_e * BEAT / 2, min(vel, 0.68)))
                 e += dur_e
-                if random.random() < 0.3:
-                    e += 1
+                if random.random() < 0.30:
+                    e += pick_duration(is_rest=True)
             phrase_phase = 0
-            e += random.choice([2, 3, 4])
+            e += pick_duration(is_rest=True) * random.choice([2, 3])
 
     return notes
 
-# ── Effect chain (unchanged, proven) ──────────────────────────────────
+# ── Effect chain ──────────────────────────────────────────────────────
 def lofi_eq(audio):
     b,  a  = signal.butter(4, 8200/(SR/2), btype='low')
     audio  = signal.filtfilt(b, a, audio)
@@ -412,99 +449,95 @@ N            = int(SR * base_dur)
 music        = np.zeros(N)
 bars         = int(base_dur / BAR)
 
-PROGRESSIONS = {
-    "minor":  [
-        [[0,2,4],[5,0,2],[3,5,0],[4,6,1]],
-        [[0,2,4],[3,5,0],[6,1,3],[5,0,2]],
-        [[0,3,5],[6,1,3],[4,6,1],[5,0,2]],
-    ],
-    "dorian": [
-        [[0,2,4],[3,5,0],[1,3,5],[4,6,1]],
-        [[0,4,6],[3,5,0],[1,3,5],[4,6,1]],
-    ],
-    "major":  [
-        [[0,2,4],[3,5,0],[4,6,1],[3,5,0]],
-        [[0,2,4],[5,0,2],[3,5,0],[4,6,1]],
-    ],
-}
-progression = random.choice(PROGRESSIONS[scale_name])
-
-# ── Rhodes chords with rhythmic variation ─────────────────────────────
-print("🎹 Generating Rhodes chords...")
-
-# Chord rhythm patterns (in beats): where to hit per bar
+# ── Chord rhythm patterns ─────────────────────────────────────────────
 CHORD_RHYTHMS = [
-    [0, 1.5, 2, 3.5],          # classic lofi on-off
-    [0, 1.5, 3],                # sparse
-    [0, 2, 2.5, 3.5],           # syncopated
-    [0, 0.5, 2, 3],             # early attack
+    [0, 1.5, 2, 3.5],   # classic lofi syncopation
+    [0, 1.5, 3],         # sparse
+    [0, 2, 2.5, 3.5],    # syncopated
+    [0, 0.5, 2, 3],      # early attack
 ]
 
+# ── 1. Rhodes chords ──────────────────────────────────────────────────
+print("🎹 Generating Rhodes chords...")
 for bar in range(bars):
     chord_deg = progression[bar % len(progression)]
     rhythm    = random.choice(CHORD_RHYTHMS)
 
     for beat_offset in rhythm:
-        # Humanize timing
-        nudge  = random.uniform(-0.012, 0.018)
-        t_pos  = bar * BAR + beat_offset * BEAT + nudge
-        idx    = int(t_pos * SR)
+        nudge = random.uniform(-0.012, 0.018)
+        t_pos = bar * BAR + beat_offset * BEAT + nudge
+        idx   = int(t_pos * SR)
         if not (0 <= idx < N): continue
 
-        # Note duration varies with rhythm position
-        if beat_offset == 0:
-            dur = BAR * random.uniform(0.55, 0.75)
-        else:
-            dur = BEAT * random.uniform(0.55, 0.90)
-
+        dur = BAR * random.uniform(0.55, 0.75) if beat_offset == 0 \
+              else BEAT * random.uniform(0.55, 0.90)
         vel   = random.uniform(0.60, 0.78)
         chord = strum_chord(chord_deg, dur, velocity=vel)
         end   = min(idx + len(chord), N)
         music[idx:end] += chord[:end-idx] * 0.44
 
-# ── Phrase-based melody ───────────────────────────────────────────────
-print("🎵 Generating melody phrases...")
+# ── 2. Chord-conditioned melody dengan section structure ──────────────
+print("🎵 Generating chord-conditioned melody (section structure)...")
 
-melody_scale = list(range(len(scale)))   # all degrees
-melody_pen   = [0, 2, 4, 5, 6]          # pentatonic-ish subset
+# Section structure (inspired by jacbz/Lofi: drum 8 bar, melody 30 bar)
+SECTION_BARS = [
+    ("intro",   4,  0.15),  # sparse
+    ("verse",   16, 0.80),  # aktif
+    ("bridge",  8,  0.50),  # lebih breathing
+    ("verse2",  16, 0.85),  # paling kaya
+    ("outro",   4,  0.20),  # fade ke sepi
+]
 
-# Generate phrases every 2 bars, sometimes rest
+melody_scale = list(range(len(scale)))
+
 bar_idx = 0
+si      = 0
 while bar_idx < bars:
-    # Rest for 0 or 1 bar occasionally
-    if random.random() < 0.25:
-        bar_idx += random.choice([1, 2])
-        continue
+    sec_name, sec_len, activity = SECTION_BARS[si % len(SECTION_BARS)]
+    actual_len = min(sec_len, bars - bar_idx)
+    print(f"   ↳ [{sec_name}] bar {bar_idx}–{bar_idx+actual_len-1} (activity={activity:.0%})")
 
-    phrase_bars = random.choice([2, 2, 4])
-    use_degrees = melody_pen if random.random() < 0.65 else melody_scale
+    inner = 0
+    while inner < actual_len:
+        if random.random() > activity:
+            skip = random.choice([1, 2])
+            inner   += skip
+            bar_idx += skip
+            continue
 
-    notes = generate_melody_phrase(use_degrees, bars=min(phrase_bars, bars - bar_idx))
+        phrase_bars = random.choice([2, 2, 4])
+        pb          = min(phrase_bars, actual_len - inner)
+        if pb <= 0: break
 
-    for (eighth_idx, degree, octave, dur, vel) in notes:
-        t_pos = bar_idx * BAR + swing_offset(eighth_idx)
-        idx   = int(t_pos * SR)
-        if not (0 <= idx < N): continue
-        freq = note_freq(root, degree, octave)
-        tone = rhodes_tone(freq, dur, vel)
-        end  = min(idx + len(tone), N)
-        music[idx:end] += tone[:end-idx] * 0.22
+        # Current chord tones untuk kondisi melody
+        cur_chord   = progression[bar_idx % len(progression)]
+        chord_tones = get_chord_tones(cur_chord)
 
-    bar_idx += phrase_bars
+        notes = generate_melody_phrase(chord_tones, melody_scale, bars=pb)
 
-# ── Walking bass ──────────────────────────────────────────────────────
+        for (eighth_idx, degree, octave, dur, vel) in notes:
+            t_pos = bar_idx * BAR + swing_offset(eighth_idx)
+            idx   = int(t_pos * SR)
+            if not (0 <= idx < N): continue
+            freq = note_freq(root, degree, octave)
+            tone = rhodes_tone(freq, dur, vel)
+            end  = min(idx + len(tone), N)
+            music[idx:end] += tone[:end-idx] * 0.22
+
+        inner   += pb
+        bar_idx += pb
+
+    si += 1
+
+# ── 3. Walking bass ───────────────────────────────────────────────────
 print("🎸 Generating walking bass...")
-
 for bar in range(bars):
-    chord_deg    = progression[bar % len(progression)]
-    root_f       = chord_root_freq(chord_deg, octave=-1)
-    next_chord   = progression[(bar + 1) % len(progression)]
-    next_root_f  = chord_root_freq(next_chord, octave=-1)
+    chord_deg   = progression[bar % len(progression)]
+    next_chord  = progression[(bar + 1) % len(progression)]
+    root_f      = chord_root_freq(chord_deg, octave=-1)
+    next_root_f = chord_root_freq(next_chord, octave=-1)
 
-    # Beat 1: root
-    beats_played = []
-
-    def add_bass(beat_offset, freq, duration=None):
+    def add_bass_note(beat_offset, freq, duration=None):
         dur_  = duration or (BEAT * 0.82)
         nudge = random.uniform(-0.006, 0.008)
         t_pos = bar * BAR + beat_offset * BEAT + nudge
@@ -513,111 +546,94 @@ for bar in range(bars):
             note = make_bass_note(freq, dur_)
             end  = min(idx + len(note), N)
             music[idx:end] += note[:end-idx]
-        beats_played.append(beat_offset)
 
-    # Beat 1: always root
-    add_bass(0, root_f, BEAT * 0.88)
+    # Beat 1: root (always)
+    add_bass_note(0, root_f, BEAT * 0.88)
 
-    # Beat 2: fifth or third of chord
+    # Beat 2: fifth atau third dari chord
     fifth_f = root_f * (2 ** (7/12))
     third_f = root_f * (2 ** (scale[2]/12))
-    add_bass(1 + random.uniform(-0.01, 0.01),
-             random.choice([fifth_f, third_f]),
-             BEAT * 0.75)
+    add_bass_note(1 + random.uniform(-0.01, 0.01),
+                  random.choice([fifth_f, third_f]), BEAT * 0.75)
 
-    # Beat 3: walking note (scale step toward beat 4)
-    walk_up = root_f * (2 ** (scale[2]/12))   # minor/major third
-    add_bass(2 + random.uniform(-0.008, 0.008),
-             walk_up, BEAT * 0.75)
+    # Beat 3: walking note (skala)
+    walk_f = root_f * (2 ** (scale[2]/12))
+    add_bass_note(2 + random.uniform(-0.008, 0.008), walk_f, BEAT * 0.75)
 
-    # Beat 4: approach note to next bar's root (chromatic or diatonic)
+    # Beat 4: chromatic approach ke root bar berikutnya
     if random.random() < 0.55:
-        approach_f = approach_note(next_root_f, semitones=random.choice([1, 2]))
+        approach_f = approach_note_freq(next_root_f, semitones=random.choice([1, 2]))
     else:
-        approach_f = root_f * (2 ** (scale[4]/12))  # fifth as approach
-    add_bass(3 + random.uniform(-0.008, 0.012),
-             approach_f, BEAT * 0.65)
+        approach_f = root_f * (2 ** (scale[4]/12))
+    add_bass_note(3 + random.uniform(-0.008, 0.012), approach_f, BEAT * 0.65)
 
-    # Occasional 8th-note fill on beat 2.5 or 3.5
+    # Occasional 8th-note fill (beat 2.5 atau 3.5)
     if random.random() < 0.30:
         fill_f = root_f * (2 ** (random.choice(scale[:5]) / 12))
-        add_bass(2.5 + random.uniform(-0.01, 0.01), fill_f, BEAT * 0.40)
+        add_bass_note(2.5 + random.uniform(-0.01, 0.01), fill_f, BEAT * 0.40)
 
-# ── Drums with humanized groove ───────────────────────────────────────
+# ── 4. Drums dengan humanized groove ─────────────────────────────────
 print("🥁 Generating drums...")
+kick_samples = [make_kick(0), make_kick(1)]
+snare_sample = make_snare(ghost=False)
+ghost_sample = make_snare(ghost=True)
+hh_closed    = make_hihat(False)
+hh_open      = make_hihat(True)
+rim_sample   = make_rim()
 
-kick_samples  = [make_kick(0), make_kick(1)]
-snare_sample  = make_snare(ghost=False)
-ghost_sample  = make_snare(ghost=True)
-hh_closed     = make_hihat(False)
-hh_open       = make_hihat(True)
-rim_sample    = make_rim()
-
-# Per-beat timing pool (subtle humanization in ms)
 def human_idx(t_pos, ms_range=9):
     nudge = random.gauss(0, ms_range * 0.001 * 0.5) * SR
     return int(t_pos * SR + nudge)
 
-def add_drum(buf, sample, idx, vel=1.0):
+def add_drum(sample, idx, vel=1.0):
+    if idx < 0 or idx >= N: return
     end = min(idx + len(sample), N)
-    if idx >= 0:
-        buf[idx:end] += sample[:end-idx] * vel
+    music[idx:end] += sample[:end-idx] * vel
 
-# Hi-hat pattern builder (16th-note grid with swing)
 for bar in range(bars):
     bar_t = bar * BAR
 
-    # Kick: beat 1 always, beat 3 often, occasional syncopation
-    add_drum(music, random.choice(kick_samples),
+    # Kick: beat 1 selalu, beat 3 sering, kadang syncopation
+    add_drum(random.choice(kick_samples),
              human_idx(bar_t + 0 * BEAT), random.uniform(0.88, 1.0))
-
     if random.random() < 0.82:
-        add_drum(music, random.choice(kick_samples),
+        add_drum(random.choice(kick_samples),
                  human_idx(bar_t + 2 * BEAT), random.uniform(0.75, 0.92))
-
-    # Syncopated kick on beat 2.5 sometimes
     if random.random() < 0.30:
-        add_drum(music, random.choice(kick_samples),
-                 human_idx(bar_t + swing_offset(5)),   # eighth 5 = beat 2.5 swung
+        add_drum(random.choice(kick_samples),
+                 human_idx(bar_t + swing_offset(5)),
                  random.uniform(0.55, 0.72))
 
-    # Snare: beats 2 and 4 (core backbeat)
-    add_drum(music, snare_sample,
-             human_idx(bar_t + 1 * BEAT), random.uniform(0.82, 1.0))
-    add_drum(music, snare_sample,
-             human_idx(bar_t + 3 * BEAT), random.uniform(0.80, 0.97))
+    # Snare: beat 2 dan 4 (core backbeat)
+    add_drum(snare_sample, human_idx(bar_t + 1 * BEAT), random.uniform(0.82, 1.0))
+    add_drum(snare_sample, human_idx(bar_t + 3 * BEAT), random.uniform(0.80, 0.97))
 
-    # Ghost notes: 1-3 random 16th positions
-    ghost_positions = random.sample([0.25, 0.5, 0.75, 1.25, 1.75,
-                                     2.25, 2.75, 3.25, 3.75], k=random.randint(1,3))
+    # Ghost notes (1–3 posisi 16th random)
+    ghost_positions = random.sample(
+        [0.25, 0.5, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25, 3.75],
+        k=random.randint(1, 3)
+    )
     for gp in ghost_positions:
         if random.random() < 0.55:
-            add_drum(music, ghost_sample,
-                     human_idx(bar_t + gp * BEAT),
+            add_drum(ghost_sample, human_idx(bar_t + gp * BEAT),
                      random.uniform(0.12, 0.28))
 
-    # Hi-hats on 8th-note grid (swung)
+    # Hi-hats pada 8th-note grid (dengan swing)
     for e_idx in range(8):
         t_pos = bar_t + swing_offset(e_idx)
         vel   = random.uniform(0.50, 0.95)
-
-        # Beat 2 & 4 upbeats: open hat sometimes
         if e_idx in (3, 7) and random.random() < 0.20:
             hat = hh_open; vel *= 0.85
         else:
             hat = hh_closed
-
-        # Skip occasional 8th for groove
-        if random.random() < 0.12:
+        if random.random() < 0.12:  # skip sesekali untuk groove
             continue
+        add_drum(hat, human_idx(t_pos, ms_range=5), vel)
 
-        add_drum(music, hat, human_idx(t_pos, ms_range=5), vel)
-
-    # Rim on beat 2 or 4 occasionally (replaces or layers snare)
+    # Rim shot sesekali (jazz feel)
     if random.random() < 0.18:
         rim_beat = random.choice([1, 3])
-        add_drum(music, rim_sample,
-                 human_idx(bar_t + rim_beat * BEAT),
+        add_drum(rim_sample, human_idx(bar_t + rim_beat * BEAT),
                  random.uniform(0.30, 0.55))
 
 # ── Effects chain ─────────────────────────────────────────────────────
@@ -629,13 +645,14 @@ music = vinyl_crackle(music, intensity=mood["crackle"])
 music = tape_saturation(music, drive=mood["saturation"])
 music = music / (np.max(np.abs(music)) + 1e-9) * 0.88
 
+# Loop ke FINAL_DURATION
 loops  = int(np.ceil(FINAL_DURATION / base_dur))
 full   = np.tile(music, loops)[:SR * FINAL_DURATION]
 stereo = stereo_widen(full, width_ms=7.2, chorus_depth=0.0007)
 sf.write(WAV_OUTPUT, stereo, SR)
 print(f"✅ Audio selesai: {WAV_OUTPUT}")
 
-# ── VIDEO (unchanged from your working version) ────────────────────────
+# ── VIDEO ─────────────────────────────────────────────────────────────
 print("\n🎬 Rendering video...")
 
 W, H       = 1280, 720
@@ -643,16 +660,18 @@ FPS        = 24
 audio_clip = AudioFileClip(WAV_OUTPUT)
 duration   = audio_clip.duration
 
+# Gradient background
 col1, col2 = mood["grad"]
 grad = np.zeros((H, W, 3), dtype=np.uint8)
 for y in range(H):
     grad[y] = [
-        max(0,min(255, int(col1[0] + (col2[0]-col1[0])*y/H))),
-        max(0,min(255, int(col1[1] + (col2[1]-col1[1])*y/H))),
-        max(0,min(255, int(col1[2] + (col2[2]-col1[2])*y/H))),
+        max(0, min(255, int(col1[0] + (col2[0]-col1[0])*y/H))),
+        max(0, min(255, int(col1[1] + (col2[1]-col1[1])*y/H))),
+        max(0, min(255, int(col1[2] + (col2[2]-col1[2])*y/H))),
     ]
 bg_clip = ImageClip(grad).set_duration(duration)
 
+# Floating boxes
 box_colors = mood["palette"]
 box_data   = [{
     'x0':  random.uniform(0, W),
@@ -675,6 +694,7 @@ for b in box_data:
             )))
     boxes_clips.append(clip)
 
+# BPM Visualizer (RGBA→RGB fix agar tidak crash di MoviePy)
 BEAT_INTERVAL = 60.0 / BPM
 def make_beat_frame(t):
     phase = (t % BEAT_INTERVAL) / BEAT_INTERVAL
@@ -685,6 +705,7 @@ def make_beat_frame(t):
     for i in range(8):
         alpha = int(70 + pulse * 130)
         d.rectangle([i*16, 32-bar_h, i*16+11, 32], fill=(*box_colors[0], alpha))
+    # FIX: flatten RGBA → RGB menggunakan warna gradient sebagai background
     bg_color = tuple(grad[H-48, W//2].tolist())
     bg = Image.new("RGB", img.size, bg_color)
     bg.paste(img, mask=img.split()[3])
@@ -693,6 +714,7 @@ def make_beat_frame(t):
 beat_clip = (VideoClip(make_beat_frame, duration=duration, ismask=False)
              .set_position((W//2-65, H-65)))
 
+# Text overlay
 try:
     font_hook = ImageFont.truetype("DejaVuSans-Bold.ttf", 52)
     font_ch   = ImageFont.truetype("DejaVuSans.ttf", 23)
@@ -708,12 +730,12 @@ d     = ImageDraw.Draw(tmp)
 hbbox = d.textbbox((0,0), hook_video,   font=font_hook)
 cbbox = d.textbbox((0,0), CHANNEL_NAME, font=font_ch)
 bbbox = d.textbbox((0,0), bpm_label,    font=font_bpm)
-TW,TH = hbbox[2]-hbbox[0], hbbox[3]-hbbox[1]
-CW    = cbbox[2]-cbbox[0]
-BW    = bbbox[2]-bbbox[0]
-pad   = 22
-txt_w = max(TW, CW, BW) + pad*2
-txt_h = TH + 40 + 22 + pad*2
+TW, TH = hbbox[2]-hbbox[0], hbbox[3]-hbbox[1]
+CW     = cbbox[2]-cbbox[0]
+BW     = bbbox[2]-bbbox[0]
+pad    = 22
+txt_w  = max(TW, CW, BW) + pad*2
+txt_h  = TH + 40 + 22 + pad*2
 
 txt_img = Image.new("RGBA", (txt_w, txt_h), (0,0,0,0))
 td      = ImageDraw.Draw(txt_img)
@@ -734,6 +756,7 @@ text_clip = (ImageClip(np.array(txt_img))
                  CY + RY * np.sin(t * 0.12)
              )))
 
+# Composite & export
 final = CompositeVideoClip(
     [bg_clip] + boxes_clips + [beat_clip, text_clip], size=(W, H)
 )
