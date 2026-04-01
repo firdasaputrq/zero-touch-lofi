@@ -1,3 +1,15 @@
+import os, json
+
+# === GITHUB ACTIONS: Load credentials dari environment variable ===
+if os.environ.get("YOUTUBE_CLIENT_SECRET"):
+    with open("client_secret.json", "w") as f:
+        f.write(os.environ["YOUTUBE_CLIENT_SECRET"])
+
+if os.environ.get("YOUTUBE_TOKEN"):
+    with open("token.json", "w") as f:
+        f.write(os.environ["YOUTUBE_TOKEN"])
+# ================================================================
+
 import pickle
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
