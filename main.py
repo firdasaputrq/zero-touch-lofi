@@ -472,7 +472,10 @@ def make_beat_frame(t):
     for i in range(8):
         alpha = int(70 + pulse * 130)
         d.rectangle([i*16, 32-bar_h, i*16+11, 32], fill=(*box_colors[0], alpha))
-    return np.array(img)
+    # ── FIX: flatten RGBA → RGB against black background ──────────────
+    bg   = Image.new("RGB", img.size, (0, 0, 0))
+    bg.paste(img, mask=img.split()[3])   # use alpha channel as mask
+    return np.array(bg)
 
 beat_clip = (VideoClip(make_beat_frame, duration=duration, ismask=False)
              .set_position((W//2-65, H-65)))
