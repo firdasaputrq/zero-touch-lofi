@@ -1,8 +1,11 @@
 numpy
 soundfile
-scipy
-moviepy
+moviepy==1.0.3
 Pillow
+scipy
+imageio
+imageio-ffmpeg
+google-api-python-client
 google-auth
 google-auth-oauthlib
-google-api-python-client
+google-auth-httplib2
