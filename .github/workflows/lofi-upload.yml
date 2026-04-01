@@ -1,48 +1,51 @@
-name: 🎶 Auto Generate & Upload Lofi
+name: 🎶 Zero Touch AI - Auto Generate & Upload
 
 on:
   schedule:
-    # Setiap hari jam 08:00 WIB (01:00 UTC)
-    - cron: '0 2 * * *'   # 02:00 UTC
-    - cron: '0 6 * * *'   # 06:00 UTC
-    - cron: '0 10 * * *'  # 10:00 UTC
-    - cron: '0 14 * * *'  # 14:00 UTC
-    - cron: '0 18 * * *'  # 18:00 UTC
+    - cron: '0 2 * * *'   # 10:00 PM EST / 7:00 PM PST  → prime time malam
+    - cron: '0 14 * * *'  # 10:00 AM EST / 7:00 AM PST  → mulai kerja/kuliah
+    - cron: '0 18 * * *'  # 02:00 PM EST / 11:00 AM PST → istirahat siang
   workflow_dispatch:
-    # Bisa juga trigger manual dari tab Actions
 
 jobs:
-  generate-and-upload:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 300   # Proteksi kalau hang
 
     steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🎬 Install FFmpeg & fonts
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: 📥 Checkout Repo
+        uses: actions/checkout@v4   # v4, bukan v3
 
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5   # v5, bukan v4
         with:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: 📦 Install dependencies
+      - name: 🎬 Install FFmpeg, Libsndfile & Fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg libsndfile1 fonts-dejavu-core
+
+      - name: ⬆️ Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: 📦 Install Python Dependencies
         run: pip install -r requirements.txt
 
-      - name: 🎵 Generate Lofi Video
+      - name: 🔑 Restore YouTube Credentials
+        run: |
+          echo '${{ secrets.YOUTUBE_CLIENT_SECRET }}' > client_secret.json
+          echo '${{ secrets.YOUTUBE_TOKEN }}' > token.json
+
+      - name: 🎵 Generate Video
         run: python main.py
 
       - name: 🚀 Upload ke YouTube
-        env:
-          YOUTUBE_TOKEN: ${{ secrets.YOUTUBE_TOKEN }}
-          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
         run: python uploader.py
 
       - name: 🧹 Cleanup file besar
         if: always()
-        run: rm -f *.wav *.mp4
+        run: |
+          rm -f *.wav *.mp4
+          echo "✅ Done"
