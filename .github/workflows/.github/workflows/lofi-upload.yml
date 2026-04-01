@@ -1,0 +1,44 @@
+name: 🎶 Auto Generate & Upload Lofi
+
+on:
+  schedule:
+    # Setiap hari jam 08:00 WIB (01:00 UTC)
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    # Bisa juga trigger manual dari tab Actions
+
+jobs:
+  generate-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🎬 Install FFmpeg & fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: 🎵 Generate Lofi Video
+        run: python main.py
+
+      - name: 🚀 Upload ke YouTube
+        env:
+          YOUTUBE_TOKEN: ${{ secrets.YOUTUBE_TOKEN }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+        run: python uploader.py
+
+      - name: 🧹 Cleanup file besar
+        if: always()
+        run: rm -f *.wav *.mp4
