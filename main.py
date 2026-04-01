@@ -15,7 +15,8 @@ import os
 # ==========================
 
 SR = 44100
-FINAL_DURATION = 3600
+#FINAL_DURATION = 3600
+FINAL_DURATION = 300
 WAV_OUTPUT = "zero_touch_ai_lofi_1hour.wav"
 VIDEO_OUTPUT = "final_video.mp4"
 
@@ -52,7 +53,8 @@ def create_chord(root, degrees, t):
 # BUILD BASE 8 MIN SECTION
 # ==========================
 
-BASE_MINUTES = 8
+#BASE_MINUTES = 8
+BASE_MINUTES = 5
 base_duration = BASE_MINUTES * 60
 total_samples = int(SR * base_duration)
 
