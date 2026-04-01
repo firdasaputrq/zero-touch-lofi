@@ -1,4 +1,5 @@
-import os, json
+import os
+import json
 
 # === GITHUB ACTIONS: Load credentials dari environment variable ===
 if os.environ.get("YOUTUBE_CLIENT_SECRET"):
@@ -10,16 +11,29 @@ if os.environ.get("YOUTUBE_TOKEN"):
         f.write(os.environ["YOUTUBE_TOKEN"])
 # ================================================================
 
-import pickle
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 VIDEO_FILE = "final_video.mp4"
 
-def upload_video():
-    with open("token.pickle", "rb") as token:
-        creds = pickle.load(token)
+def load_credentials():
+    creds = Credentials.from_authorized_user_file("token.json")
 
+    # Auto refresh jika token expired
+    if creds.expired and creds.refresh_token:
+        print("🔄 Token expired, refreshing...")
+        creds.refresh(Request())
+        # Simpan token yang sudah di-refresh
+        with open("token.json", "w") as f:
+            f.write(creds.to_json())
+        print("✅ Token berhasil di-refresh")
+
+    return creds
+
+def upload_video():
+    creds = load_credentials()
     youtube = build("youtube", "v3", credentials=creds)
 
     request = youtube.videos().insert(
@@ -28,26 +42,19 @@ def upload_video():
             "snippet": {
                 "title": "🎧 1 Hour Lofi Hip Hop Beat – Relaxing Study Music 🌙 | Chill Focus & Sleep | Zero Touch Music",
                 "description": """🎶 1 Hour of Relaxing Lofi Hip Hop Beats for Study, Focus, and Sleep.
-
 Welcome to Zero Touch Music 🎧 — your home for chill lofi vibes and peaceful background music.
-
 This 1 hour lofi mix is perfect for:
-
 📚 Studying & Homework
 💻 Deep Focus & Productivity
 🌙 Late Night Sessions
 😴 Sleep & Relaxation
 🌿 Stress Relief
-
-If you’re searching for:
+If you're searching for:
 lofi hip hop, 1 hour lofi beat, relaxing study music, chill beats for focus, calm background music, sleep lofi — this mix is made for you.
-
 ✨ Subscribe to Zero Touch Music for everyday lofi beats.
 👍 Like & comment if this helped you focus.
 🔔 Turn on notifications for more chill vibes.
-
 Press play. Relax. Let the beat flow 🌊
-
 #lofi 
 #study 
 #chill 
