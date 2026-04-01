@@ -3,7 +3,11 @@ name: 🎶 Auto Generate & Upload Lofi
 on:
   schedule:
     # Setiap hari jam 08:00 WIB (01:00 UTC)
-    - cron: '0 1 * * *'
+    - cron: '0 2 * * *'   # 02:00 UTC
+    - cron: '0 6 * * *'   # 06:00 UTC
+    - cron: '0 10 * * *'  # 10:00 UTC
+    - cron: '0 14 * * *'  # 14:00 UTC
+    - cron: '0 18 * * *'  # 18:00 UTC
   workflow_dispatch:
     # Bisa juga trigger manual dari tab Actions
 
