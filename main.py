@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 
 SR             = 44100
-FINAL_DURATION = 3600        # detik (1 jam)
+FINAL_DURATION = 300 #3600        # detik (1 jam)
 WAV_OUTPUT     = "lofi_output.wav"
 VIDEO_OUTPUT   = "final_video.mp4"
 CHANNEL_NAME   = "Driftory"
@@ -164,7 +164,7 @@ def vinyl_warmth(audio):
     return audio[np.clip(np.arange(len(audio))+shift, 0, len(audio)-1)]
 
 # ── Build music ───────────────────────────────────────────────
-BASE_MINUTES = 8
+BASE_MINUTES = 5 #8
 base_dur = BASE_MINUTES * 60
 N        = int(SR * base_dur)
 music    = np.zeros(N)
